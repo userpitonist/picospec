@@ -1,0 +1,9 @@
+[
+  {"dtype": "float32", "backend": "scalar-novec", "len": 256, "median_us": 455.240, "min_us": 445.568, "p90_us": 504.812},
+  {"dtype": "float32", "backend": "scalar", "len": 256, "median_us": 260.599, "min_us": 255.333, "p90_us": 277.911},
+  {"dtype": "float32", "backend": "neon", "len": 256, "median_us": 49.470, "min_us": 49.049, "p90_us": 57.084},
+  {"dtype": "int8", "backend": "scalar-novec", "len": 256, "median_us": 287.328, "min_us": 279.646, "p90_us": 310.266},
+  {"dtype": "int8", "backend": "scalar", "len": 256, "median_us": 57.976, "min_us": 57.584, "p90_us": 62.119},
+  {"dtype": "int8", "backend": "neon", "len": 256, "median_us": 29.272, "min_us": 29.131, "p90_us": 30.592},
+  {"dtype": "int8", "backend": "neon-dotprod", "len": 256, "median_us": 22.849, "min_us": 22.673, "p90_us": 24.952}
+]
