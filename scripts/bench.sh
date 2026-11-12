@@ -20,8 +20,17 @@ cmake --build build -j > /dev/null
   fi
   echo "compiler: $(${CXX:-c++} --version | head -1)"
   echo
+  echo "Bacteria classifier, one 1000-sample spectrum per inference:"
+  echo
+  ./build/picospec bench \
+      --model models/classifier_f32.psm \
+      --model models/classifier_int8.psm \
+      --len 1000 --samples 300 --json "$out/bench.json"
+  echo
+  echo "Denoiser, one 256-sample spectrum per inference:"
+  echo
   ./build/picospec bench \
       --model models/denoiser_f32.psm \
       --model models/denoiser_int8.psm \
-      --len 256 --samples 300 --json "$out/bench.json"
+      --len 256 --samples 300 --json "$out/bench_denoiser.json"
 } | tee "$out/bench.md"

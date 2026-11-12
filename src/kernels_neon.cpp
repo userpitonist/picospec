@@ -23,13 +23,12 @@ inline int32x4_t dot16_mull(int32x4_t acc, int8x16_t x, int8x16_t w) {
 
 }  // namespace
 
-void conv1d_f32_neon(const float* in, float* out, std::size_t len, const ConvF32& L) {
+void conv1d_f32_neon(const float* in, float* out, std::size_t out_len, const ConvF32& L) {
     const int kc = L.k * L.cin;
     const int kc16 = kc & ~15;
     const int kc4 = kc & ~3;
-    const int pad = L.k / 2;
-    for (std::size_t i = 0; i < len; ++i) {
-        const float* win = in + (static_cast<std::ptrdiff_t>(i) - pad) * L.cin;
+    for (std::size_t i = 0; i < out_len; ++i) {
+        const float* win = in + (static_cast<std::ptrdiff_t>(i) * L.stride - L.pad) * L.cin;
         for (int co = 0; co < L.cout; ++co) {
             const float* w = L.w + static_cast<std::size_t>(co) * kc;
             // Four independent accumulators: an FMA has a latency of several

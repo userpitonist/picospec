@@ -1,4 +1,4 @@
-"""Score every implementation on the same 4000 unseen simulated spectra.
+"""Score every implementation of the denoiser on the same 4000 unseen simulated spectra.
 
     python python/evaluate.py [--binary build/picospec]
 
@@ -15,13 +15,16 @@ import argparse
 import json
 import pathlib
 import subprocess
+import sys
 import tempfile
 
 import numpy as np
 import torch
 
-from export import load_models
-from spectra import SEED_TEST, SEED_VAL, make_spectra
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))  # siblings, also under python -I
+
+from export import load_models  # noqa: E402
+from spectra import SEED_TEST, SEED_VAL, make_spectra  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -51,13 +54,14 @@ def savgol_filter(x: np.ndarray, window: int, order: int = 3) -> np.ndarray:
 
 
 def run_cpp(binary: str, model: str, backend: str, x: np.ndarray) -> np.ndarray:
+    """Run spectra [n, len] through the C++ engine -> raw model outputs [n, values per spectrum]."""
     with tempfile.TemporaryDirectory() as tmp:
         fin, fout = pathlib.Path(tmp) / "in.f32", pathlib.Path(tmp) / "out.f32"
         x.astype("<f4").tofile(fin)
         subprocess.run([binary, "run", "--model", str(ROOT / "models" / model), "--in", str(fin),
                         "--out", str(fout), "--len", str(x.shape[1]), "--backend", backend],
                        check=True, capture_output=True)
-        return np.fromfile(fout, dtype="<f4").reshape(x.shape)
+        return np.fromfile(fout, dtype="<f4").reshape(len(x), -1)
 
 
 def backends(binary: str, model: str) -> list[str]:

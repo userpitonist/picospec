@@ -21,18 +21,17 @@ inline int32_t tail_dot(const int8_t* a, const int8_t* b, int from, int to) {
 
 }  // namespace
 
-void PICOSPEC_Q8_FN(const int8_t* in, int8_t* out, std::size_t len, const ConvQ8& L) {
+void PICOSPEC_Q8_FN(const int8_t* in, int8_t* out, std::size_t out_len, const ConvQ8& L) {
     const int kc = L.k * L.cin;
     const int kc16 = kc & ~15;  // part of the receptive field handled 16 bytes at a time
-    const int pad = L.k / 2;
     const int cout4 = L.cout & ~3;
 
     const int32x4_t v_zp = vdupq_n_s32(L.out_zp);
     const int32x4_t v_min = vdupq_n_s32(L.act_min);
     const int32x4_t v_max = vdupq_n_s32(L.act_max);
 
-    for (std::size_t i = 0; i < len; ++i) {
-        const int8_t* win = in + (static_cast<std::ptrdiff_t>(i) - pad) * L.cin;
+    for (std::size_t i = 0; i < out_len; ++i) {
+        const int8_t* win = in + (static_cast<std::ptrdiff_t>(i) * L.stride - L.pad) * L.cin;
         int8_t* o = out + i * L.cout;
 
         int co = 0;
