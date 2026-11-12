@@ -1,0 +1,38 @@
+{
+  "test_spectra": 3000,
+  "classes": 30,
+  "accuracy": {
+    "logistic regression, raw spectra": 0.7233333333333334,
+    "logistic regression, standardised inputs (settings picked on the test set)": 0.8323333333333334,
+    "CNN float32, PyTorch": 0.8466666666666667,
+    "CNN float32, C++ engine": 0.8466666666666667,
+    "CNN int8, Python integer reference": 0.8496666666666667,
+    "CNN int8, C++ engine (all backends)": 0.8496666666666667
+  },
+  "cpp_accuracy_by_backend": {
+    "float32/scalar-novec": 0.8466666666666667,
+    "float32/scalar": 0.8466666666666667,
+    "float32/neon": 0.8466666666666667,
+    "int8/scalar-novec": 0.8496666666666667,
+    "int8/scalar": 0.8496666666666667,
+    "int8/neon": 0.8496666666666667,
+    "int8/neon-dotprod": 0.8496666666666667
+  },
+  "int8_minus_float32_points": 0.30000000000000027,
+  "int8_float32_agreement": 0.9813333333333333,
+  "standard_error_points": 0.657830328231179,
+  "checks": {
+    "f32/scalar-novec: max |C++ - PyTorch| (scores reach 118)": 0.00020599365234375,
+    "f32/scalar-novec: same predicted class as PyTorch on every spectrum": true,
+    "f32/scalar: max |C++ - PyTorch| (scores reach 118)": 0.00020599365234375,
+    "f32/scalar: same predicted class as PyTorch on every spectrum": true,
+    "f32/neon: max |C++ - PyTorch| (scores reach 118)": 0.00018310546875,
+    "f32/neon: same predicted class as PyTorch on every spectrum": true,
+    "int8/scalar-novec: all 90000 scores identical to integer reference": true,
+    "int8/scalar: all 90000 scores identical to integer reference": true,
+    "int8/neon: all 90000 scores identical to integer reference": true,
+    "int8/neon-dotprod: all 90000 scores identical to integer reference": true,
+    "f32: `picospec classify` labels == argmax of reference scores": true,
+    "int8: `picospec classify` labels == argmax of reference scores": true
+  }
+}

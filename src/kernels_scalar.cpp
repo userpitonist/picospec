@@ -13,12 +13,11 @@
 
 namespace picospec {
 
-void PICOSPEC_NAME(conv1d_f32_)(const float* in, float* out, std::size_t len,
+void PICOSPEC_NAME(conv1d_f32_)(const float* in, float* out, std::size_t out_len,
                                 const ConvF32& L) {
     const int kc = L.k * L.cin;  // length of one receptive field
-    const int pad = L.k / 2;
-    for (std::size_t i = 0; i < len; ++i) {
-        const float* win = in + (static_cast<std::ptrdiff_t>(i) - pad) * L.cin;
+    for (std::size_t i = 0; i < out_len; ++i) {
+        const float* win = in + (static_cast<std::ptrdiff_t>(i) * L.stride - L.pad) * L.cin;
         for (int co = 0; co < L.cout; ++co) {
             const float* w = L.w + static_cast<std::size_t>(co) * kc;
             float acc = L.b[co];
@@ -29,12 +28,11 @@ void PICOSPEC_NAME(conv1d_f32_)(const float* in, float* out, std::size_t len,
     }
 }
 
-void PICOSPEC_NAME(conv1d_q8_)(const int8_t* in, int8_t* out, std::size_t len,
+void PICOSPEC_NAME(conv1d_q8_)(const int8_t* in, int8_t* out, std::size_t out_len,
                                const ConvQ8& L) {
     const int kc = L.k * L.cin;
-    const int pad = L.k / 2;
-    for (std::size_t i = 0; i < len; ++i) {
-        const int8_t* win = in + (static_cast<std::ptrdiff_t>(i) - pad) * L.cin;
+    for (std::size_t i = 0; i < out_len; ++i) {
+        const int8_t* win = in + (static_cast<std::ptrdiff_t>(i) * L.stride - L.pad) * L.cin;
         for (int co = 0; co < L.cout; ++co) {
             const int8_t* w = L.w + static_cast<std::size_t>(co) * kc;
             int32_t acc = L.bias[co];

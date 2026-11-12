@@ -25,4 +25,6 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Benchmark (informational)
         if: matrix.sanitize == 'OFF'
-        run: ./build/picospec bench --model models/denoiser_f32.psm --model models/denoiser_int8.psm
+        run: |
+          ./build/picospec bench --model models/classifier_f32.psm --model models/classifier_int8.psm --len 1000
+          ./build/picospec bench --model models/denoiser_f32.psm --model models/denoiser_int8.psm --len 256

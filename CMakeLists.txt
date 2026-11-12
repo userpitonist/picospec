@@ -29,7 +29,14 @@ else()
 endif()
 target_sources(picospec PRIVATE $<TARGET_OBJECTS:picospec_novec>)
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+# Target architecture. On macOS a cross-build (for example
+# -DCMAKE_OSX_ARCHITECTURES=x86_64 on Apple silicon) keeps the host's
+# CMAKE_SYSTEM_PROCESSOR, so the requested architecture takes priority.
+set(PICOSPEC_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+if(CMAKE_OSX_ARCHITECTURES)
+  set(PICOSPEC_ARCH "${CMAKE_OSX_ARCHITECTURES}")
+endif()
+if(PICOSPEC_ARCH MATCHES "^(aarch64|arm64|ARM64)$")
   target_sources(picospec PRIVATE src/kernels_neon.cpp src/kernels_dotprod.cpp)
   # Only this one file may use SDOT; it is selected at run time.
   set_source_files_properties(src/kernels_dotprod.cpp PROPERTIES

@@ -119,38 +119,69 @@ private:
 };
 
 struct Shape {
-    int cin, cout, k;
+    int cin, cout, k, stride, pad;
     bool relu;
 };
 
+// Limits on one layer. They are generous for real models and small enough
+// that no size computation below can overflow.
+constexpr uint32_t kMaxChannels = 1024, kMaxKernel = 65536, kMaxStride = 64;
+
 Shape read_shape(Reader& r, int expected_cin) {
     const uint32_t cin = r.scalar<uint32_t>(), cout = r.scalar<uint32_t>();
-    const uint32_t k = r.scalar<uint32_t>(), relu = r.scalar<uint32_t>();
-    if (cin == 0 || cout == 0 || cin > 1024 || cout > 1024)
+    const uint32_t k = r.scalar<uint32_t>(), stride = r.scalar<uint32_t>();
+    const uint32_t pad = r.scalar<uint32_t>(), relu = r.scalar<uint32_t>();
+    if (cin == 0 || cout == 0 || cin > kMaxChannels || cout > kMaxChannels)
         throw std::runtime_error("model file: channel count out of range");
-    if (k == 0 || k > 63 || k % 2 == 0) throw std::runtime_error("model file: kernel must be odd and <= 63");
+    if (k == 0 || k > kMaxKernel) throw std::runtime_error("model file: kernel size out of range");
+    if (stride == 0 || stride > kMaxStride) throw std::runtime_error("model file: stride out of range");
+    if (pad >= k) throw std::runtime_error("model file: padding must be smaller than the kernel");
     if (relu > 1) throw std::runtime_error("model file: bad activation flag");
     if (static_cast<int>(cin) != expected_cin)
         throw std::runtime_error("model file: layer input channels do not match previous layer");
-    return {static_cast<int>(cin), static_cast<int>(cout), static_cast<int>(k), relu == 1};
+    return {static_cast<int>(cin), static_cast<int>(cout), static_cast<int>(k),
+            static_cast<int>(stride), static_cast<int>(pad), relu == 1};
 }
 
+// Checks shared by both model types. Models can also be built directly from
+// Layer structs (the tests do), so the constructor validates again.
 template <typename LayerT>
-void check_io_shape(const std::vector<LayerT>& layers) {
+int check_layers(const std::vector<LayerT>& layers) {
     if (layers.empty()) throw std::runtime_error("model has no layers");
-    if (layers.front().cin != 1 || layers.back().cout != 1)
-        throw std::runtime_error("model must map one input channel to one output channel");
+    if (layers.front().cin != 1) throw std::runtime_error("model must take one input channel");
+    int cin = 1, max_pad = 0;
+    for (const LayerT& L : layers) {
+        if (L.cin != cin || L.cout < 1 || L.k < 1 || L.stride < 1 || L.pad < 0 || L.pad >= L.k)
+            throw std::runtime_error("model has an invalid layer shape");
+        if (L.w.size() != static_cast<std::size_t>(L.cout) * L.k * L.cin)
+            throw std::runtime_error("model layer has the wrong number of weights");
+        cin = L.cout;
+        max_pad = std::max(max_pad, L.pad);
+    }
+    return max_pad;
 }
 
-// Copies `len` samples into the middle of a padded buffer and fills both
-// margins with `zero`. Returns a pointer to sample 0.
+// Length of the final output (in samples) for `len` input samples.
+template <typename LayerT>
+std::size_t final_len(const std::vector<LayerT>& layers, std::size_t len) {
+    for (const LayerT& L : layers) {
+        len = conv_out_len(len, L.k, L.stride, L.pad);
+        if (len == 0) throw std::runtime_error("input is too short for this model");
+    }
+    return len;
+}
+
+// Makes room for `len` samples of `channels` values with a margin of
+// `max_pad` samples on each side, fills both margins with `zero`, and
+// returns a pointer to sample 0.
 template <typename T>
-T* prepare(std::vector<T>& buf, std::size_t len, int channels, int max_pad, int max_ch, T zero) {
-    const std::size_t need = (len + 2 * static_cast<std::size_t>(max_pad)) * max_ch;
+T* prepare(std::vector<T>& buf, std::size_t len, int channels, int max_pad, T zero) {
+    const std::size_t margin = static_cast<std::size_t>(max_pad) * channels;
+    const std::size_t need = len * channels + 2 * margin;
     if (buf.size() < need) buf.resize(need);
-    T* p = buf.data() + static_cast<std::size_t>(max_pad) * channels;
+    T* p = buf.data() + margin;
     std::fill(buf.data(), p, zero);
-    std::fill(p + len * channels, p + (len + max_pad) * channels, zero);
+    std::fill(p + len * channels, p + len * channels + margin, zero);
     return p;
 }
 
@@ -163,11 +194,17 @@ std::unique_ptr<Model> Model::load(const std::string& path) {
     if (!f) throw std::runtime_error("cannot open model file: " + path);
     std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(f)),
                                      std::istreambuf_iterator<char>());
+    return parse(std::move(bytes));
+}
+
+std::unique_ptr<Model> Model::parse(std::vector<unsigned char> bytes) {
     Reader r(std::move(bytes));
 
     const auto magic = r.array<char>(4);
-    if (std::memcmp(magic.data(), "PSM1", 4) != 0)
-        throw std::runtime_error("not a picospec model (bad magic): " + path);
+    if (std::memcmp(magic.data(), "PSM1", 4) == 0)
+        throw std::runtime_error("model file is the old PSM1 format; re-export it with python/export.py");
+    if (std::memcmp(magic.data(), "PSM2", 4) != 0)
+        throw std::runtime_error("not a picospec model (bad magic)");
     const uint32_t dtype = r.scalar<uint32_t>();
     const uint32_t n_layers = r.scalar<uint32_t>();
     if (n_layers == 0 || n_layers > 64) throw std::runtime_error("model file: bad layer count");
@@ -178,7 +215,8 @@ std::unique_ptr<Model> Model::load(const std::string& path) {
         for (uint32_t i = 0; i < n_layers; ++i) {
             const Shape s = read_shape(r, cin);
             FloatModel::Layer L;
-            L.cin = s.cin, L.cout = s.cout, L.k = s.k, L.relu = s.relu;
+            L.cin = s.cin, L.cout = s.cout, L.k = s.k, L.stride = s.stride, L.pad = s.pad;
+            L.relu = s.relu;
             L.w = r.array<float>(static_cast<std::size_t>(s.cout) * s.k * s.cin);
             L.b = r.array<float>(s.cout);
             for (float v : L.w) if (!std::isfinite(v)) throw std::runtime_error("model file: non-finite weight");
@@ -200,8 +238,14 @@ std::unique_ptr<Model> Model::load(const std::string& path) {
         int32_t prev_zp = 0;
         for (uint32_t i = 0; i < n_layers; ++i) {
             const Shape s = read_shape(r, cin);
+            // The kernels sum k*cin products of two int8 values plus a bias
+            // in an int32. With fewer than 65536 products of at most 2^14
+            // each and |bias| <= 2^30 that sum cannot overflow, whatever the
+            // file contains.
+            if (static_cast<int64_t>(s.k) * s.cin >= 65536)
+                throw std::runtime_error("model file: int8 layer has too many inputs per output");
             QuantizedModel::Layer L;
-            L.cin = s.cin, L.cout = s.cout, L.k = s.k;
+            L.cin = s.cin, L.cout = s.cout, L.k = s.k, L.stride = s.stride, L.pad = s.pad;
             L.in_zp = r.scalar<int32_t>();
             L.out_zp = r.scalar<int32_t>();
             if (L.in_zp < -128 || L.in_zp > 127 || L.out_zp < -128 || L.out_zp > 127)
@@ -217,6 +261,8 @@ std::unique_ptr<Model> Model::load(const std::string& path) {
             L.mult = r.array<int32_t>(s.cout);
             L.shift = r.array<int32_t>(s.cout);
             for (int c = 0; c < s.cout; ++c) {
+                if (L.bias[c] > (int32_t{1} << 30) || L.bias[c] < -(int32_t{1} << 30))
+                    throw std::runtime_error("model file: bias out of range");
                 if (L.mult[c] < (int32_t{1} << 30)) throw std::runtime_error("model file: multiplier not normalised");
                 if (L.shift[c] < 0 || L.shift[c] > 31) throw std::runtime_error("model file: shift out of range");
             }
@@ -233,11 +279,10 @@ std::unique_ptr<Model> Model::load(const std::string& path) {
 // ------------------------------------------------------------- float model
 
 FloatModel::FloatModel(std::vector<Layer> layers) : layers_(std::move(layers)) {
-    check_io_shape(layers_);
-    for (const Layer& L : layers_) {
-        max_pad_ = std::max(max_pad_, L.k / 2);
-        max_ch_ = std::max({max_ch_, L.cin, L.cout});
-    }
+    max_pad_ = check_layers(layers_);
+    for (const Layer& L : layers_)
+        if (L.b.size() != static_cast<std::size_t>(L.cout))
+            throw std::runtime_error("model layer has the wrong number of biases");
 }
 
 std::size_t FloatModel::num_params() const {
@@ -250,29 +295,37 @@ bool FloatModel::supports(Backend b) const {
     return b != Backend::NeonDot && backend_available(b);
 }
 
+std::size_t FloatModel::output_size(std::size_t len) const {
+    return final_len(layers_, len) * static_cast<std::size_t>(layers_.back().cout);
+}
+
 void FloatModel::run(const float* in, float* out, std::size_t len, Backend backend,
                      Workspace& ws) const {
     const ConvF32Fn conv = f32_kernel(backend);
-    float* cur = prepare(ws.f32[0], len, 1, max_pad_, max_ch_, 0.0f);
+    const std::size_t total = output_size(len);  // also rejects inputs that are too short
+    float* cur = prepare(ws.f32[0], len, 1, max_pad_, 0.0f);
     std::copy(in, in + len, cur);
     int which = 0;
+    std::size_t n = len;
     for (const Layer& L : layers_) {
+        n = conv_out_len(n, L.k, L.stride, L.pad);
         which ^= 1;
-        float* next = prepare(ws.f32[which], len, L.cout, max_pad_, max_ch_, 0.0f);
-        conv(cur, next, len, L.view());
+        float* next = prepare(ws.f32[which], n, L.cout, max_pad_, 0.0f);
+        conv(cur, next, n, L.view());
         cur = next;
     }
-    std::copy(cur, cur + len, out);
+    std::copy(cur, cur + total, out);
 }
 
 // --------------------------------------------------------- quantised model
 
 QuantizedModel::QuantizedModel(std::vector<Layer> layers, float in_scale, float out_scale)
     : layers_(std::move(layers)), in_scale_(in_scale), out_scale_(out_scale) {
-    check_io_shape(layers_);
+    max_pad_ = check_layers(layers_);
     for (const Layer& L : layers_) {
-        max_pad_ = std::max(max_pad_, L.k / 2);
-        max_ch_ = std::max({max_ch_, L.cin, L.cout});
+        const std::size_t c = static_cast<std::size_t>(L.cout);
+        if (L.bias.size() != c || L.mult.size() != c || L.shift.size() != c)
+            throw std::runtime_error("model layer has the wrong number of biases or multipliers");
     }
 }
 
@@ -291,6 +344,10 @@ std::size_t QuantizedModel::weight_bytes() const {
 
 bool QuantizedModel::supports(Backend b) const { return backend_available(b); }
 
+std::size_t QuantizedModel::output_size(std::size_t len) const {
+    return final_len(layers_, len) * static_cast<std::size_t>(layers_.back().cout);
+}
+
 int8_t QuantizedModel::quantize_input(float x) const {
     // Round-half-to-even in double precision, the same rule as numpy.rint,
     // so the Python reference and the engine quantise identically.
@@ -306,31 +363,33 @@ float QuantizedModel::dequantize_output(int8_t q) const {
 void QuantizedModel::run_q8(const int8_t* in, int8_t* out, std::size_t len, Backend backend,
                             Workspace& ws) const {
     const ConvQ8Fn conv = q8_kernel(backend);
+    const std::size_t total = output_size(len);  // also rejects inputs that are too short
     // Margins hold the zero-point, i.e. the int8 code for real 0.0, so
-    // "same" padding needs no special case inside the kernels.
-    int8_t* cur = prepare(ws.q8[0], len, 1, max_pad_, max_ch_,
-                          static_cast<int8_t>(layers_.front().in_zp));
+    // padding needs no special case inside the kernels.
+    int8_t* cur = prepare(ws.q8[0], len, 1, max_pad_, static_cast<int8_t>(layers_.front().in_zp));
     std::copy(in, in + len, cur);
     int which = 0;
+    std::size_t n = len;
     for (const Layer& L : layers_) {
+        n = conv_out_len(n, L.k, L.stride, L.pad);
         which ^= 1;
-        int8_t* next = prepare(ws.q8[which], len, L.cout, max_pad_, max_ch_,
-                               static_cast<int8_t>(L.out_zp));
-        conv(cur, next, len, L.view());
+        int8_t* next = prepare(ws.q8[which], n, L.cout, max_pad_, static_cast<int8_t>(L.out_zp));
+        conv(cur, next, n, L.view());
         cur = next;
     }
-    std::copy(cur, cur + len, out);
+    std::copy(cur, cur + total, out);
 }
 
 void QuantizedModel::run(const float* in, float* out, std::size_t len, Backend backend,
                          Workspace& ws) const {
+    const std::size_t total = output_size(len);
     std::vector<int8_t>& qin = ws.io[0];
     std::vector<int8_t>& qout = ws.io[1];
     if (qin.size() < len) qin.resize(len);
-    if (qout.size() < len) qout.resize(len);
+    if (qout.size() < total) qout.resize(total);
     for (std::size_t i = 0; i < len; ++i) qin[i] = quantize_input(in[i]);
     run_q8(qin.data(), qout.data(), len, backend, ws);
-    for (std::size_t i = 0; i < len; ++i) out[i] = dequantize_output(qout[i]);
+    for (std::size_t i = 0; i < total; ++i) out[i] = dequantize_output(qout[i]);
 }
 
 }  // namespace picospec

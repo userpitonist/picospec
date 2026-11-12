@@ -1,0 +1,9 @@
+[
+  {"model": "denoiser_f32", "dtype": "float32", "backend": "scalar-novec", "len": 256, "median_us": 455.266, "min_us": 445.344, "p90_us": 474.495},
+  {"model": "denoiser_f32", "dtype": "float32", "backend": "scalar", "len": 256, "median_us": 258.172, "min_us": 255.432, "p90_us": 267.724},
+  {"model": "denoiser_f32", "dtype": "float32", "backend": "neon", "len": 256, "median_us": 50.661, "min_us": 49.729, "p90_us": 52.442},
+  {"model": "denoiser_int8", "dtype": "int8", "backend": "scalar-novec", "len": 256, "median_us": 249.344, "min_us": 244.146, "p90_us": 255.266},
+  {"model": "denoiser_int8", "dtype": "int8", "backend": "scalar", "len": 256, "median_us": 58.688, "min_us": 57.246, "p90_us": 59.353},
+  {"model": "denoiser_int8", "dtype": "int8", "backend": "neon", "len": 256, "median_us": 29.550, "min_us": 28.815, "p90_us": 30.142},
+  {"model": "denoiser_int8", "dtype": "int8", "backend": "neon-dotprod", "len": 256, "median_us": 22.940, "min_us": 22.370, "p90_us": 23.324}
+]
